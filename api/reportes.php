@@ -16,15 +16,15 @@ $python = '/usr/bin/python3';
 $cmd = escapeshellcmd($python) . ' ' . escapeshellarg($script);
 
 $env = [
-    'PATH' => getenv('PATH') ?: '/usr/bin:/bin',
-    'PYTHONPATH' => __DIR__ . '/python-vendor',
-    'REPORTES_PGHOST' => 'localhost',
-    'REPORTES_PGPORT' => '5432',
-    'REPORTES_PGUSER' => 'mtonelli',
-    'REPORTES_PGPASSWORD' => 'jC0p5g8J',
-    'REPORTES_PGDATABASE' => 'ejercitodigital-chatbot',
-    'REPORTES_LIMIT' => (string)$limit,
-    'REPORTES_OFFSET' => (string)$offset,
+    'PATH'               => getenv('PATH') ?: '/usr/bin:/bin',
+    'PYTHONPATH'         => __DIR__ . '/python-vendor',
+    'REPORTES_PGHOST'     => getenv('REPORTES_PGHOST')     ?: 'localhost',
+    'REPORTES_PGPORT'     => getenv('REPORTES_PGPORT')     ?: '5432',
+    'REPORTES_PGUSER'     => getenv('REPORTES_PGUSER')     ?: '',
+    'REPORTES_PGPASSWORD' => getenv('REPORTES_PGPASSWORD') ?: '',
+    'REPORTES_PGDATABASE' => getenv('REPORTES_PGDATABASE') ?: '',
+    'REPORTES_LIMIT'     => (string)$limit,
+    'REPORTES_OFFSET'    => (string)$offset,
 ];
 
 $descriptors = [

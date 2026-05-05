@@ -7,12 +7,13 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-$PAGE_SIZE = 100;
-$offset    = 0;
-$all       = [];
+$PAGE_SIZE   = 100;
+$offset      = 0;
+$all         = [];
+$API_BASE    = rtrim(getenv('PERSONAS_API_URL') ?: 'http://127.0.0.1:8089', '/');
 
 do {
-    $url  = "http://127.0.0.1:8089/api/personas?limit={$PAGE_SIZE}&offset={$offset}";
+    $url  = "{$API_BASE}/api/personas?limit={$PAGE_SIZE}&offset={$offset}";
     $raw  = @file_get_contents($url);
 
     if ($raw === false) {

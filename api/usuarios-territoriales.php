@@ -2,7 +2,7 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 
-$base   = 'http://127.0.0.1:8089/api/usuarios-territoriales';
+$base   = rtrim(getenv('PERSONAS_API_URL') ?: 'http://127.0.0.1:8089', '/') . '/api/usuarios-territoriales';
 $limit  = 100;
 $offset = 0;
 $all    = [];
