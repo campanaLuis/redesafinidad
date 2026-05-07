@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const EXTERNAL_SUPABASE_URL = 'https://ejrgdoiilyhthbwfxxxk.supabase.co';
-const EXTERNAL_PUBLISHABLE_KEY = 'sb_publishable_XYoXtkLrs0dxPHexJVIkLQ_T0zYOPU4';
+const EXTERNAL_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const EXTERNAL_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 export const externalSupabase = createClient(
   EXTERNAL_SUPABASE_URL,
