@@ -15,4 +15,12 @@ REPORTES_PGDATABASE=${REPORTES_PGDATABASE:-}
 PERSONAS_API_URL=${PERSONAS_API_URL:-http://127.0.0.1:8089}
 EOF
 
+# Agregar usuarios APP_USER_1..20 al .env
+for i in $(seq 1 20); do
+  eval "val=\${APP_USER_${i}:-}"
+  if [ -n "$val" ]; then
+    echo "APP_USER_${i}=${val}" >> /var/www/html/.env
+  fi
+done
+
 exec "$@"
