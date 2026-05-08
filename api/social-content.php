@@ -1,42 +1,40 @@
 <?php
+/**
+ * Agrega comentarios de todas las plataformas desde el chatbot backend
+ * y los transforma al formato SocialPost que espera el frontend.
+ */
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
 header('Access-Control-Allow-Origin: *');
 
-$base   = rtrim(getenv('PERSONAS_API_URL') ?: 'http://127.0.0.1:8089', '/') . '/api/social-content';
-$limit  = 100;
-$offset = 0;
-$all    = [];
+require_once __DIR__ . '/_db.php';
 
-while (true) {
-    $url  = "{$base}?limit={$limit}&offset={$offset}";
-    $json = @file_get_contents($url);
-    if ($json === false) { http_response_code(502); echo json_encode(['error' => 'Cannot reach upstream API']); exit; }
+$platforms = ['twitter', 'instagram', 'facebook', 'tiktok'];
+$all = [];
 
-    $page = json_decode($json, true);
-    if (!is_array($page) || empty($page['data'])) break;
+foreach ($platforms as $platform) {
+    $rows = chatbot_get("/chatbot/comentarios/{$platform}");
+    if (!is_array($rows)) continue;
 
-    foreach ($page['data'] as $r) {
+    foreach ($rows as $r) {
         $all[] = [
-            'id'              => $r['id']              ?? null,
-            'platform'        => $r['platform']        ?? null,
-            'content_type'    => $r['content_type']    ?? null,
-            'external_id'     => $r['external_id']     ?? null,
-            'parent_id'       => $r['parent_id']       ?? null,
-            'username'        => $r['username']         ?? null,
-            'content'         => $r['content']         ?? null,
-            'url'             => $r['url']              ?? null,
-            'likes'           => isset($r['likes'])     ? (int)$r['likes']           : 0,
-            'comments_count'  => isset($r['comments_count']) ? (int)$r['comments_count'] : 0,
-            'posted_date'     => $r['posted_date']     ?? null,
-            'created_at'      => $r['created_at']      ?? null,
-            'scrap_realizado' => $r['scrap_realizado'] ?? null,
-            'sentiment'       => $r['sentiment']       ?? null,
-            'key_id'          => $r['key_id']          ?? null,
+            'id'              => (string)($r['id']            ?? uniqid()),
+            'platform'        => $platform,
+            'content_type'    => 'comment',
+            'external_id'     => isset($r['post_id']) ? (string)$r['post_id'] : null,
+            'parent_id'       => null,
+            'username'        => $r['username']    ?? $r['usuario']  ?? null,
+            'content'         => $r['comentario']  ?? $r['comment']  ?? null,
+            'url'             => null,
+            'likes'           => 0,
+            'comments_count'  => 0,
+            'posted_date'     => $r['fecha']       ?? $r['created_at'] ?? null,
+            'created_at'      => $r['created_at']  ?? $r['fecha']    ?? null,
+            'scrap_realizado' => null,
+            'sentiment'       => $r['sentimiento'] ?? $r['sentiment'] ?? null,
+            'key_id'          => null,
         ];
     }
-
-    if (count($page['data']) < $limit) break;
-    $offset += $limit;
 }
 
 echo json_encode($all, JSON_UNESCAPED_UNICODE);

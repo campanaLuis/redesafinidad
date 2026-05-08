@@ -1,16 +1,17 @@
 <?php
 /**
- * Maneja las rutas /api/social-legacy/* consultando PostgreSQL.
+ * /api/social-legacy/{platform}/{resource}
+ * Sirve datos sociales usando el backend del chatbot como fuente.
  *
- * Rutas soportadas (PATH_INFO):
- *   GET  /{platform}/posts?limit&offset
- *   GET  /{platform}/comments?limit&offset&full=1
- *   GET  /{platform}/comments-for-post?post_id=N
- *   GET  /{platform}/post-meta?ids=1,2,3
- *   POST /member-comment-search   body: {platform, targetNorm, variants[]}
+ * El chatbot expone:  GET /chatbot/comentarios/{platform}
+ * → devuelve todos los comentarios de esa plataforma.
  *
- * Tablas esperadas: {Platform}_publicaciones, {Platform}_comentarios
- * donde Platform = Twitter | Instagram | Facebook | TikTok
+ * Rutas:
+ *   GET /{platform}/comments?limit&offset&full=1
+ *   GET /{platform}/comments-for-post?post_id=N
+ *   GET /{platform}/post-meta?ids=1,2,3
+ *   GET /{platform}/posts?limit&offset          (sin fuente → array vacío)
+ *   POST /member-comment-search                 body: {platform, targetNorm, variants[]}
  */
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -21,45 +22,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
 require_once __DIR__ . '/_db.php';
 
-// PATH_INFO viene del nginx (ej. /twitter/posts)
-$path   = trim($_SERVER['PATH_INFO'] ?? '', '/');
-$parts  = explode('/', $path);
-$method = $_SERVER['REQUEST_METHOD'];
+$path    = trim($_SERVER['PATH_INFO'] ?? '', '/');
+$parts   = explode('/', $path);
+$method  = $_SERVER['REQUEST_METHOD'];
 
-// ── Mapeo de plataforma → nombres de tabla ──────────────────────────────
-$platformMap = [
-    'twitter'   => ['posts' => 'Twitter_publicaciones',   'comments' => 'Twitter_comentarios'],
-    'instagram' => ['posts' => 'Instagram_publicaciones', 'comments' => 'Instagram_comentarios'],
-    'facebook'  => ['posts' => 'Facebook_publicaciones',  'comments' => 'Facebook_comentarios'],
-    'tiktok'    => ['posts' => 'TikTok_publicaciones',    'comments' => 'TikTok_comentarios'],
-];
+$validPlatforms = ['twitter', 'instagram', 'facebook', 'tiktok'];
+
+// ── Normaliza una fila del chatbot al formato que espera el frontend ──
+function normalize_comment(array $r, bool $full): array {
+    $row = [
+        'post_id'    => isset($r['post_id'])    ? (int)$r['post_id']    : 0,
+        'username'   => $r['username']           ?? $r['usuario']        ?? null,
+        'sentimiento'=> $r['sentimiento']        ?? $r['sentiment']      ?? null,
+    ];
+    if ($full) $row['comentario'] = $r['comentario'] ?? $r['comment'] ?? $r['texto'] ?? null;
+    return $row;
+}
 
 // ── POST /member-comment-search ─────────────────────────────────────────
 if ($method === 'POST' && $path === 'member-comment-search') {
     $body     = json_decode(file_get_contents('php://input'), true) ?? [];
     $platform = strtolower($body['platform'] ?? '');
-    $target   = $body['targetNorm'] ?? '';
-    $variants = array_values(array_filter((array)($body['variants'] ?? []), 'is_string'));
+    $variants = array_map('strtolower', array_values(array_filter((array)($body['variants'] ?? []), 'is_string')));
 
-    if (!isset($platformMap[$platform]) || empty($variants)) {
-        echo json_encode([]); exit;
-    }
-    $tbl = $platformMap[$platform]['comments'];
+    if (!in_array($platform, $validPlatforms, true) || empty($variants)) { echo json_encode([]); exit; }
 
-    try {
-        $pdo = get_pdo();
-        $placeholders = implode(',', array_fill(0, count($variants), '?'));
-        $sql  = "SELECT post_id, comentario, sentimiento, username
-                 FROM \"{$tbl}\"
-                 WHERE LOWER(username) IN ({$placeholders})
-                 LIMIT 2000";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array_map('strtolower', $variants));
-        echo json_encode($stmt->fetchAll(), JSON_UNESCAPED_UNICODE);
-    } catch (PDOException $e) {
-        http_response_code(502);
-        echo json_encode(['error' => $e->getMessage()]);
+    $all = chatbot_get("/chatbot/comentarios/{$platform}");
+    if (!$all) { echo json_encode([]); exit; }
+
+    $out = [];
+    foreach ($all as $r) {
+        $user = strtolower($r['username'] ?? $r['usuario'] ?? '');
+        if (in_array($user, $variants, true)) {
+            $out[] = [
+                'post_id'     => isset($r['post_id']) ? (int)$r['post_id'] : 0,
+                'comentario'  => $r['comentario'] ?? $r['comment'] ?? null,
+                'sentimiento' => $r['sentimiento'] ?? $r['sentiment'] ?? null,
+                'username'    => $r['username'] ?? $r['usuario'] ?? null,
+            ];
+        }
     }
+    echo json_encode($out, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -67,83 +70,54 @@ if ($method === 'POST' && $path === 'member-comment-search') {
 $platform = strtolower($parts[0] ?? '');
 $resource = $parts[1] ?? '';
 
-if (!isset($platformMap[$platform])) {
+if (!in_array($platform, $validPlatforms, true)) {
     http_response_code(404);
     echo json_encode(['error' => "Plataforma desconocida: {$platform}"]);
     exit;
 }
 
-$tblPosts    = $platformMap[$platform]['posts'];
-$tblComments = $platformMap[$platform]['comments'];
 $limit  = min((int)($_GET['limit']  ?? 1000), 5000);
 $offset = max((int)($_GET['offset'] ?? 0),    0);
 
-try {
-    $pdo = get_pdo();
-
-    if ($resource === 'posts') {
-        $stmt = $pdo->prepare(
-            "SELECT id AS post_id, username, fecha AS posted_date, url, contenido AS caption,
-                    COALESCE(likes, 0) AS likes, COALESCE(comentarios, 0) AS comentarios
-             FROM \"{$tblPosts}\"
-             ORDER BY id ASC
-             LIMIT :lim OFFSET :off"
-        );
-        $stmt->bindValue(':lim', $limit,  PDO::PARAM_INT);
-        $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
-        $stmt->execute();
-        echo json_encode($stmt->fetchAll(), JSON_UNESCAPED_UNICODE);
-
-    } elseif ($resource === 'comments') {
-        $full   = ($_GET['full'] ?? '0') === '1';
-        $select = $full
-            ? "post_id, username, sentimiento, comentario"
-            : "post_id, username, sentimiento";
-        $stmt = $pdo->prepare(
-            "SELECT {$select}
-             FROM \"{$tblComments}\"
-             ORDER BY id ASC
-             LIMIT :lim OFFSET :off"
-        );
-        $stmt->bindValue(':lim', $limit,  PDO::PARAM_INT);
-        $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
-        $stmt->execute();
-        echo json_encode($stmt->fetchAll(), JSON_UNESCAPED_UNICODE);
-
-    } elseif ($resource === 'comments-for-post') {
-        $postId = (int)($_GET['post_id'] ?? 0);
-        $stmt   = $pdo->prepare(
-            "SELECT username, comentario, sentimiento
-             FROM \"{$tblComments}\"
-             WHERE post_id = :pid
-             LIMIT 500"
-        );
-        $stmt->bindValue(':pid', $postId, PDO::PARAM_INT);
-        $stmt->execute();
-        echo json_encode($stmt->fetchAll(), JSON_UNESCAPED_UNICODE);
-
-    } elseif ($resource === 'post-meta') {
-        $ids = array_filter(array_map('intval', explode(',', $_GET['ids'] ?? '')));
-        if (empty($ids)) { echo json_encode([]); exit; }
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $pdo->prepare(
-            "SELECT id AS post_id, url, contenido AS caption
-             FROM \"{$tblPosts}\"
-             WHERE id IN ({$placeholders})"
-        );
-        $stmt->execute(array_values($ids));
-        $result = [];
-        foreach ($stmt->fetchAll() as $row) {
-            $result[(string)$row['post_id']] = ['url' => $row['url'], 'caption' => $row['caption']];
-        }
-        echo json_encode($result, JSON_UNESCAPED_UNICODE);
-
-    } else {
-        http_response_code(404);
-        echo json_encode(['error' => "Recurso desconocido: {$resource}"]);
-    }
-
-} catch (PDOException $e) {
-    http_response_code(502);
-    echo json_encode(['error' => 'DB error: ' . $e->getMessage()]);
+if ($resource === 'posts') {
+    // Sin fuente de posts en el chatbot — devuelve vacío para cortar el loop
+    echo json_encode([]);
+    exit;
 }
+
+if ($resource === 'comments') {
+    $all = chatbot_get("/chatbot/comentarios/{$platform}");
+    if ($all === null) { http_response_code(502); echo json_encode(['error' => 'Chatbot no disponible']); exit; }
+    $full = ($_GET['full'] ?? '0') === '1';
+    $page = array_slice($all, $offset, $limit);
+    $out  = array_values(array_map(fn($r) => normalize_comment($r, $full), $page));
+    echo json_encode($out, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($resource === 'comments-for-post') {
+    $postId = (int)($_GET['post_id'] ?? 0);
+    $all    = chatbot_get("/chatbot/comentarios/{$platform}");
+    if ($all === null) { echo json_encode([]); exit; }
+    $out = [];
+    foreach ($all as $r) {
+        if ((int)($r['post_id'] ?? 0) === $postId) {
+            $out[] = [
+                'username'    => $r['username']    ?? $r['usuario']   ?? null,
+                'comentario'  => $r['comentario']  ?? $r['comment']   ?? null,
+                'sentimiento' => $r['sentimiento'] ?? $r['sentiment'] ?? null,
+            ];
+        }
+    }
+    echo json_encode($out, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($resource === 'post-meta') {
+    // Sin datos de posts — devuelve objeto vacío
+    echo json_encode((object)[]);
+    exit;
+}
+
+http_response_code(404);
+echo json_encode(['error' => "Recurso desconocido: {$resource}"]);
