@@ -8,12 +8,14 @@ require_once __DIR__ . '/_db.php';
 $limit  = min((int)($_GET['limit']  ?? 500), 2_000_000);
 $offset = max((int)($_GET['offset'] ?? 0),   0);
 
-$result = supabase_get('beneficiarios', $limit, $offset, 'creado_en.desc');
-
-if ($result === null) {
+try {
+    $pdo  = get_pdo();
+    $stmt = $pdo->prepare("SELECT * FROM beneficiarios ORDER BY creado_en DESC LIMIT :lim OFFSET :off");
+    $stmt->bindValue(':lim', $limit,  PDO::PARAM_INT);
+    $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    echo json_encode($stmt->fetchAll(), JSON_UNESCAPED_UNICODE);
+} catch (PDOException $e) {
     http_response_code(502);
-    echo json_encode(['error' => 'No se pudo conectar a Supabase. Verifica SUPABASE_URL y SUPABASE_ANON_KEY en EasyPanel.']);
-    exit;
+    echo json_encode(['error' => $e->getMessage()]);
 }
-
-echo json_encode($result['data'], JSON_UNESCAPED_UNICODE);
