@@ -1,12 +1,12 @@
 # ─────────────────────────────────────────────
 # Stage 1: Build React/Vite frontend
 # ─────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM oven/bun:1-alpine AS builder
 
 WORKDIR /build
 
-COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+COPY package.json bun.lock* bun.lockb* ./
+RUN bun install --frozen-lockfile
 
 COPY . .
 
@@ -17,19 +17,21 @@ ARG VITE_SUPABASE_PUBLISHABLE_KEY
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 
-RUN npm run build
+RUN bun run build
 
 # ─────────────────────────────────────────────
 # Stage 2: Runtime – Nginx + PHP-FPM + Python3
 # ─────────────────────────────────────────────
 FROM php:8.2-fpm-alpine
 
-# Instalar nginx, supervisor y python3
+# Instalar nginx, supervisor, python3 y dependencias para pdo_pgsql
 RUN apk add --no-cache \
     nginx \
     supervisor \
     python3 \
     curl \
+    libpq-dev \
+    && docker-php-ext-install pdo pdo_pgsql \
     && mkdir -p /run/nginx /var/log/supervisor
 
 # Copiar dist del frontend
