@@ -23,4 +23,8 @@ for i in $(seq 1 20); do
   fi
 done
 
+# Inyectar PERSONAS_API_URL en la config de nginx
+PERSONAS_URL="${PERSONAS_API_URL:-http://127.0.0.1:8089}"
+sed -i "s|PERSONAS_API_URL_PLACEHOLDER|${PERSONAS_URL}|g" /etc/nginx/nginx.conf
+
 exec "$@"
