@@ -1,37 +1,52 @@
 <?php
+/**
+ * GET /api/usuarios-territoriales
+ * Devuelve la lista de operadores de la estructura territorial
+ * desde la tabla usuarios_territoriales en el PostgreSQL del chatbot.
+ */
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
 header('Access-Control-Allow-Origin: *');
 
-$base   = rtrim(getenv('PERSONAS_API_URL') ?: 'http://127.0.0.1:8089', '/') . '/api/usuarios-territoriales';
-$limit  = 100;
-$offset = 0;
-$all    = [];
+require_once __DIR__ . '/_db.php';
 
-while (true) {
-    $url  = "{$base}?limit={$limit}&offset={$offset}";
-    $json = @file_get_contents($url);
-    if ($json === false) { http_response_code(502); echo json_encode(['error' => 'Cannot reach upstream API']); exit; }
+try {
+    $pdo  = get_pdo();
+    $stmt = $pdo->query(
+        "SELECT id, nombre, celular, tipo_usuario, programa,
+                municipio, localidad, superior_id, activo, created_at
+         FROM usuarios_territoriales
+         WHERE activo = TRUE
+         ORDER BY
+           CASE tipo_usuario
+             WHEN 'estatal'  THEN 1
+             WHEN 'regional' THEN 2
+             WHEN 'enlace'   THEN 3
+             WHEN 'vocal'    THEN 4
+             WHEN 'promotor' THEN 5
+             ELSE 6
+           END,
+           nombre ASC"
+    );
 
-    $page = json_decode($json, true);
-    if (!is_array($page) || empty($page['data'])) break;
-
-    foreach ($page['data'] as $r) {
-        $all[] = [
-            'id'           => $r['id']          ?? null,
-            'nombre'       => $r['nombre']       ?? null,
-            'celular'      => $r['celular']      ?? null,
-            'tipo_usuario' => isset($r['tipo_usuario']) ? strtolower($r['tipo_usuario']) : null,
-            'programa'     => $r['programa']     ?? null,   // puede ser CSV: "PROG A, PROG B"
-            'municipio'    => $r['municipio']    ?? null,
-            'localidad'    => $r['localidad']    ?? null,
-            'superior_id'  => $r['superior_id']  ?? null,
-            'activo'       => $r['activo']       ?? null,
-            'creado_en'    => $r['created_at']   ?? null,
+    $rows = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $rows[] = [
+            'id'          => (string)$r['id'],
+            'nombre'      => $r['nombre'],
+            'celular'     => $r['celular'],
+            'tipo_usuario'=> $r['tipo_usuario'],
+            'programa'    => $r['programa'],
+            'municipio'   => $r['municipio'],
+            'localidad'   => $r['localidad'],
+            'superior_id' => $r['superior_id'] !== null ? (string)$r['superior_id'] : null,
+            'activo'      => (bool)$r['activo'],
+            'creado_en'   => $r['created_at'],
         ];
     }
 
-    if (count($page['data']) < $limit) break;
-    $offset += $limit;
+    echo json_encode($rows, JSON_UNESCAPED_UNICODE);
+} catch (PDOException $e) {
+    http_response_code(502);
+    echo json_encode(['error' => $e->getMessage()]);
 }
-
-echo json_encode($all, JSON_UNESCAPED_UNICODE);

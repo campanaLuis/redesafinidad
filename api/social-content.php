@@ -1,13 +1,7 @@
 <?php
 /**
- * Agrega posts de todas las plataformas desde las tablas redes_sociales.*_posts
- * en el PostgreSQL de reportes (REPORTES_PG*) y los transforma al formato
- * SocialPost que espera el frontend.
- *
- * Tablas consultadas:
- *   redes_sociales.facebook_posts
- *   redes_sociales.instagram_posts
- *   redes_sociales.tiktok_posts
+ * Proxy hacia el endpoint /api/social-content del chatbot (puerto 8089).
+ * Ese servicio devuelve los posts de redes sociales con likes, comments_count, etc.
  */
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -15,45 +9,62 @@ header('Access-Control-Allow-Origin: *');
 
 require_once __DIR__ . '/_db.php';
 
-$platforms = [
-    'facebook'  => 'redes_sociales.facebook_posts',
-    'instagram' => 'redes_sociales.instagram_posts',
-    'tiktok'    => 'redes_sociales.tiktok_posts',
-];
+$base   = rtrim(env('PERSONAS_API_URL', 'http://127.0.0.1:8089'), '/') . '/api/social-content';
+$limit  = 500;
+$offset = 0;
+$all    = [];
 
-$all = [];
+while (true) {
+    $url  = "{$base}?limit={$limit}&offset={$offset}";
+    $ctx  = stream_context_create(['http' => ['method' => 'GET', 'timeout' => 30, 'ignore_errors' => true]]);
+    $json = @file_get_contents($url, false, $ctx);
 
-try {
-    $pdo = get_pdo();
-
-    foreach ($platforms as $platform => $table) {
-        $stmt = $pdo->query("SELECT * FROM {$table} ORDER BY posted_date DESC");
-        $rows = $stmt->fetchAll();
-
-        foreach ($rows as $r) {
-            $all[] = [
-                'id'              => $platform . '_' . $r['post_id'],
-                'platform'        => $platform,
-                'content_type'    => 'post',
-                'external_id'     => (string)$r['post_id'],
-                'parent_id'       => null,
-                'username'        => $r['username']        ?? null,
-                'content'         => $r['caption']         ?? null,
-                'url'             => $r['url']              ?? null,
-                'likes'           => (int)($r['likes']      ?? 0),
-                'comments_count'  => (int)($r['comentarios'] ?? 0),
-                'posted_date'     => $r['posted_date']     ?? null,
-                'created_at'      => $r['created_at']      ?? null,
-                'scrap_realizado' => $r['scrap_realizado']  ?? null,
-                'sentiment'       => null,
-                'key_id'          => null,
-            ];
-        }
+    if ($json === false) {
+        http_response_code(502);
+        echo json_encode(['error' => "No se pudo conectar al servicio de redes sociales ({$url})"]);
+        exit;
     }
 
-    echo json_encode($all, JSON_UNESCAPED_UNICODE);
+    $page = json_decode($json, true);
 
-} catch (PDOException $e) {
-    http_response_code(502);
-    echo json_encode(['error' => $e->getMessage()]);
+    // El servicio puede devolver array plano o {data:[...]}
+    if (is_array($page) && isset($page['data'])) {
+        $rows = $page['data'];
+    } elseif (is_array($page) && array_is_list($page)) {
+        $rows = $page;
+    } else {
+        // Respuesta inesperada — devolver el cuerpo para depuración
+        http_response_code(502);
+        echo json_encode(['error' => 'Respuesta inesperada del servicio', 'raw' => substr($json, 0, 500)]);
+        exit;
+    }
+
+    if (empty($rows)) break;
+
+    foreach ($rows as $r) {
+        $all[] = [
+            'id'              => $r['id']              ?? null,
+            'platform'        => $r['platform']        ?? null,
+            'content_type'    => $r['content_type']    ?? null,
+            'external_id'     => $r['external_id']     ?? null,
+            'parent_id'       => $r['parent_id']       ?? null,
+            'username'        => $r['username']        ?? null,
+            'content'         => $r['content']         ?? null,
+            'url'             => $r['url']              ?? null,
+            'likes'           => isset($r['likes'])          ? (int)$r['likes']          : 0,
+            'comments_count'  => isset($r['comments_count']) ? (int)$r['comments_count'] : 0,
+            'posted_date'     => $r['posted_date']     ?? null,
+            'created_at'      => $r['created_at']      ?? null,
+            'scrap_realizado' => $r['scrap_realizado'] ?? null,
+            'sentiment'       => $r['sentiment']       ?? null,
+            'key_id'          => $r['key_id']          ?? null,
+        ];
+    }
+
+    // Si el servicio devolvió array plano, no hay paginación
+    if (is_array($page) && array_is_list($page)) break;
+    if (count($rows) < $limit) break;
+    $offset += $limit;
 }
+
+echo json_encode($all, JSON_UNESCAPED_UNICODE);
