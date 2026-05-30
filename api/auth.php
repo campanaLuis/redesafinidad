@@ -49,9 +49,20 @@ for ($i = 1; $i <= 20; $i++) {
 
 if (!$matched) { http_response_code(401); echo json_encode(['ok'=>false,'error'=>'Credenciales inválidas.']); exit; }
 
-$header  = base64_encode(json_encode(['alg'=>'HS256','typ'=>'JWT']));
-$payload = base64_encode(json_encode(['login'=>$matched['login'],'role'=>$matched['role'],'exp'=>time()+86400*30]));
-$sig     = hash_hmac('sha256', "{$header}.{$payload}", $secret, true);
-$token   = "{$header}.{$payload}." . base64_encode($sig);
+// JWT con base64url (RFC 7515) — no base64 estándar que usa +/= incompatibles con URLs
+function jwt_base64url_encode(string $data): string {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
 
-echo json_encode(['ok'=>true,'token'=>$token,'login'=>$matched['login'],'role'=>$matched['role']]);
+$header  = jwt_base64url_encode((string)json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
+$payload = jwt_base64url_encode((string)json_encode([
+    'login' => $matched['login'],
+    'role'  => $matched['role'],
+    'iat'   => time(),               // issued at
+    'exp'   => time() + 86400 * 30, // 30 días
+]));
+// HMAC-SHA256 sobre header.payload — raw binary luego base64url
+$sig   = hash_hmac('sha256', "{$header}.{$payload}", $secret, true);
+$token = "{$header}.{$payload}." . jwt_base64url_encode($sig);
+
+echo json_encode(['ok' => true, 'token' => $token, 'login' => $matched['login'], 'role' => $matched['role']]);
