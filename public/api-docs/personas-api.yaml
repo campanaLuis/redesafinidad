@@ -4,7 +4,7 @@ info:
   version: "1.0.0"
   description: |
     API para descarga de registros de personas (redes-afinidad / AGORA).
-    Mismos endpoints en ambas plataformas — solo cambia el `servers.url`.
+    Mismos endpoints en ambas plataformas — solo cambia el host base.
 
     ## Autenticación
 
@@ -47,27 +47,51 @@ tags:
     description: Exportación de registros de personas
 
 paths:
-  /personas/export/full:
+  /api/personas_export.php:
     get:
       tags: [Personas]
-      summary: Descarga completa
+      summary: Exportación de personas (full o incremental)
       description: |
-        Devuelve **todos** los registros de personas con todos sus campos, paginado.
+        Endpoint único. El parámetro `mode` selecciona el tipo de descarga.
 
-        Ejemplo de iteración completa:
+        **Descarga completa** (`mode=full`): devuelve todos los registros paginados.
+
+        **Descarga incremental** (`mode=incremental`): devuelve solo registros creados
+        o con actividad reciente desde `since` (`created_at` o `ultimo_mensaje_timestamp ≥ since`).
+
+        Ejemplo completo:
         ```bash
-        page=1
-        while true; do
-          resp=$(curl -s "$BASE_URL/personas/export/full?page=$page&per_page=500" \
-            -H "Authorization: Bearer $TOKEN")
-          echo "$resp" | jq '.data[]'
-          pages=$(echo "$resp" | jq '.pages')
-          [ $page -ge $pages ] && break
-          page=$((page+1))
-        done
+        curl "https://seguimientoamigos.whoopflow.com/api/personas_export.php?mode=full&per_page=500&page=1" \
+          -H "Authorization: Bearer $TOKEN"
         ```
-      operationId: personasExportFull
+
+        Ejemplo incremental:
+        ```bash
+        curl "https://seguimientoamigos.whoopflow.com/api/personas_export.php?mode=incremental&since=2026-05-01T00:00:00Z" \
+          -H "Authorization: Bearer $TOKEN"
+        ```
+      operationId: personasExport
       parameters:
+        - name: mode
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [full, incremental]
+          example: full
+          description: |
+            `full` — primera sincronización o reinicio completo.
+            `incremental` — sincronizaciones periódicas (requiere `since`).
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: "2026-05-01T00:00:00Z"
+          description: |
+            Requerido cuando `mode=incremental`. Fecha ISO 8601.
+            Ejemplos válidos: `2026-05-01T00:00:00Z`, `2026-05-01T00:00:00-05:00`, `2026-05-01`.
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       security:
@@ -94,66 +118,6 @@ paths:
                     telefono: "+5214421234567"
                     colonia: "Centro"
                     created_at: "2025-03-15T10:30:00Z"
-        "401":
-          $ref: '#/components/responses/Unauthorized'
-        "500":
-          $ref: '#/components/responses/ServerError'
-
-  /personas/export/incremental:
-    get:
-      tags: [Personas]
-      summary: Descarga incremental
-      description: |
-        Devuelve solo los registros **creados o modificados** desde la fecha indicada.
-
-        - En redes-afinidad: detecta cambios por `created_at` o `ultimo_mensaje_timestamp ≥ since`.
-        - En AGORA: usa `updated_at` del contacto.
-
-        Recomendación: guardar el timestamp del último sync exitoso y usarlo como `since`
-        en la siguiente llamada.
-
-        ```bash
-        curl "$BASE_URL/personas/export/incremental?since=2026-05-01T00:00:00Z&per_page=500" \
-          -H "Authorization: Bearer $TOKEN"
-        ```
-      operationId: personasExportIncremental
-      parameters:
-        - name: since
-          in: query
-          required: true
-          schema:
-            type: string
-            format: date-time
-          example: "2026-05-01T00:00:00Z"
-          description: |
-            Fecha ISO 8601 desde la cual traer cambios.
-            Ejemplos válidos: `2026-05-01T00:00:00Z`, `2026-05-01T00:00:00-05:00`, `2026-05-01`.
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PerPage'
-      security:
-        - bearerAuth: []
-        - agentToken: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExportResponse'
-              example:
-                success: true
-                mode: incremental
-                total: 47
-                page: 1
-                per_page: 500
-                pages: 1
-                since: "2026-05-01T00:00:00Z"
-                data:
-                  - id: 102
-                    nombre: "María González"
-                    telefono: "+5214421234568"
-                    created_at: "2026-05-10T08:00:00Z"
-                    updated_at: "2026-05-20T14:22:00Z"
         "400":
           $ref: '#/components/responses/BadRequest'
         "401":
