@@ -93,6 +93,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     };
 
+    // ── 0. SSO por URL params (más confiable que postMessage) ───────────
+    const urlParams = new URLSearchParams(window.location.search);
+    const agoraToken = urlParams.get('agora_token');
+    const agoraAccount = urlParams.get('agora_account');
+    if (agoraToken && agoraAccount) {
+      console.log('[SSO] login por URL params, account:', agoraAccount);
+      embeddedSession.current = true;
+      setToken(agoraToken);
+      setUser({ login: `agora_account_${agoraAccount}`, role: 'administrador', exp: Date.now() / 1000 + 3600 });
+      setIsLoading(false);
+      return;
+    }
+
     const stored = localStorage.getItem(TOKEN_KEY);
 
     // ── 1. Hay token guardado: verificar con el backend propio ──────────
