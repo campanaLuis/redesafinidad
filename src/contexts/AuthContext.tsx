@@ -46,7 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const auth = parsed.data?.auth as { access_token?: string; account_id?: number } | undefined;
           const agent = parsed.data?.currentAgent as { id?: number; name?: string; email?: string } | undefined;
 
-          if (!auth?.access_token) return;
+          // Necesitamos al menos account_id o agent para identificar la sesión
+          if (!auth?.account_id && !agent?.id && !agent?.email) return;
 
           clearTimeout(timeout);
           embeddedSession.current = true;
