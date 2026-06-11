@@ -41,13 +41,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const parsed: { event?: string; data?: Record<string, unknown> } =
             typeof event.data === "string" ? JSON.parse(event.data) : event.data;
 
+          console.log("[SSO] mensaje recibido:", parsed?.event, "origin:", event.origin);
+
           if (parsed?.event !== "appContext") return;
 
           const auth = parsed.data?.auth as { access_token?: string; account_id?: number } | undefined;
           const agent = parsed.data?.currentAgent as { id?: number; name?: string; email?: string } | undefined;
 
+          console.log("[SSO] appContext recibido — auth:", JSON.stringify(auth), "agent:", JSON.stringify(agent));
+
           // Necesitamos al menos account_id o agent para identificar la sesión
-          if (!auth?.account_id && !agent?.id && !agent?.email) return;
+          if (!auth?.account_id && !agent?.id && !agent?.email) {
+            console.warn("[SSO] descartado: sin account_id ni agent");
+            return;
+          }
 
           clearTimeout(timeout);
           embeddedSession.current = true;
