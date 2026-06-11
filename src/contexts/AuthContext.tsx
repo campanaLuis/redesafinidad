@@ -28,34 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const embeddedSession = useRef(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_KEY);
-
-    // ── 1. Hay token guardado: verificar con el backend propio ──────────
-    if (stored) {
-      fetch("/api/auth-verify.php", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${stored}`, "Content-Type": "application/json" },
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (d.ok) {
-            setToken(stored);
-            setUser({ login: d.login, role: d.role, exp: d.exp });
-          } else {
-            localStorage.removeItem(TOKEN_KEY);
-          }
-        })
-        .catch(() => localStorage.removeItem(TOKEN_KEY))
-        .finally(() => setIsLoading(false));
-      return;
-    }
-
-    // ── 2. Sin token guardado: si estamos embebidos en AGORA, pedir SSO ─
-    if (isEmbedded()) {
+    // Configura el listener SSO para cuando corremos dentro de un iframe de AGORA.
+    // Devuelve un cleanup o no-op.
+    const startSSO = (): (() => void) => {
       const timeout = setTimeout(() => setIsLoading(false), AGORA_SSO_TIMEOUT);
 
       const handleMessage = (event: MessageEvent) => {
-        // Validar origen si está configurado
         const allowedOrigin = import.meta.env.VITE_AGORA_ORIGIN as string | undefined;
         if (allowedOrigin && event.origin !== allowedOrigin) return;
 
@@ -73,9 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           clearTimeout(timeout);
           embeddedSession.current = true;
 
-          // Usamos email o nombre del agente como identificador de sesión
           const login = agent?.email ?? agent?.name ?? "agora_user";
-          // En modo embebido el token es el de AGORA (solo en memoria, no en localStorage)
           setToken(auth.access_token);
           setUser({ login, role: "administrador", exp: Date.now() / 1000 + 3600 });
           setIsLoading(false);
@@ -86,9 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       window.addEventListener("message", handleMessage);
 
-      // Solicitar contexto al parent (AGORA).
-      // Reintenta varias veces con delay porque el iframe puede recibir el
-      // primer postMessage antes de que React haya montado el listener.
+      // Solicitar contexto al parent (AGORA) con reintentos para cubrir la
+      // race condition entre la carga del iframe y el mount del listener en AGORA.
       const retryDelays = [0, 300, 800, 1500];
       const retryTimers: ReturnType<typeof setTimeout>[] = [];
       const requestContext = () => {
@@ -108,7 +83,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearTimeout(timeout);
         retryTimers.forEach(clearTimeout);
       };
+    };
+
+    const stored = localStorage.getItem(TOKEN_KEY);
+
+    // ── 1. Hay token guardado: verificar con el backend propio ──────────
+    if (stored) {
+      fetch("/api/auth-verify.php", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${stored}`, "Content-Type": "application/json" },
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.ok) {
+            setToken(stored);
+            setUser({ login: d.login, role: d.role, exp: d.exp });
+            setIsLoading(false);
+          } else {
+            localStorage.removeItem(TOKEN_KEY);
+            // Token inválido — si estamos en iframe, intentar SSO en lugar de mostrar login
+            if (!isEmbedded()) setIsLoading(false);
+            else startSSO();
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem(TOKEN_KEY);
+          // Error de red — misma lógica: SSO si embebido, login si no
+          if (!isEmbedded()) setIsLoading(false);
+          else startSSO();
+        });
+      return;
     }
+
+    // ── 2. Sin token guardado: SSO si embebido, login si no ─────────────
+    if (isEmbedded()) return startSSO();
 
     // ── 3. No embebido y sin token: mostrar login ────────────────────────
     setIsLoading(false);
