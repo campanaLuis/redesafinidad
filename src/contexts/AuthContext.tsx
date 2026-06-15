@@ -20,12 +20,28 @@ const isEmbedded = () => {
   try { return window.self !== window.top; } catch { return true; }
 };
 
+/** Lee URL params al momento de cargar — síncrono, antes del primer render. */
+function getAgoraSession(): { user: AuthUser; token: string } | null {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const t = p.get('agora_token');
+    const a = p.get('agora_account');
+    if (!t || !a) return null;
+    return {
+      token: t,
+      user: { login: `agora_account_${a}`, role: 'administrador', exp: Date.now() / 1000 + 3600 },
+    };
+  } catch { return null; }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser]           = useState<AuthUser | null>(null);
-  const [token, setToken]         = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Inicializar síncronamente desde URL params para evitar el flash de login
+  const agoraSession = useRef(getAgoraSession());
+  const [user, setUser]           = useState<AuthUser | null>(agoraSession.current?.user ?? null);
+  const [token, setToken]         = useState<string | null>(agoraSession.current?.token ?? null);
+  const [isLoading, setIsLoading] = useState(agoraSession.current ? false : true);
   // Flag para saber si la sesión vino de AGORA (no guardamos en localStorage)
-  const embeddedSession = useRef(false);
+  const embeddedSession = useRef(agoraSession.current !== null);
 
   useEffect(() => {
     // Configura el listener SSO para cuando corremos dentro de un iframe de AGORA.
@@ -93,16 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     };
 
-    // ── 0. SSO por URL params (más confiable que postMessage) ───────────
-    const urlParams = new URLSearchParams(window.location.search);
-    const agoraToken = urlParams.get('agora_token');
-    const agoraAccount = urlParams.get('agora_account');
-    if (agoraToken && agoraAccount) {
-      console.log('[SSO] login por URL params, account:', agoraAccount);
-      embeddedSession.current = true;
-      setToken(agoraToken);
-      setUser({ login: `agora_account_${agoraAccount}`, role: 'administrador', exp: Date.now() / 1000 + 3600 });
-      setIsLoading(false);
+    // ── 0. SSO por URL params — ya resuelto síncronamente en useState ───
+    if (agoraSession.current) {
+      console.log('[SSO] sesión AGORA inicializada por URL params');
       return;
     }
 
